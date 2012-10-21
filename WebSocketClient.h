@@ -1,7 +1,9 @@
 /*
  WebsocketClient, a websocket client for Arduino
  Copyright 2011 Kevin Rohling
+ Copyright 2012 Ian Moore
  http://kevinrohling.com
+ http://www.incamoon.com
  
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -25,32 +27,64 @@
 #ifndef WEBSOCKETCLIENT_H
 #define WEBSOCKETCLIENT_H_
 
-#include <string.h>
+#define TRACE // uncomment to support TRACE level debugging of wire protocol
+#define DEBUG // turn on debugging
+
+#define RETRY_TIMEOUT 3000
+
 #include <stdlib.h>
-#include <WString.h>
 #include <Ethernet.h>
 #include "Arduino.h"
-
-//Uncomment this to use WIFLY Client
-#define WIFLY true
+#include <SoftwareSerial.h>
 
 class WebSocketClient {
-	public:
-		typedef void (*DataArrivedDelegate)(WebSocketClient client, String data);
-		bool connect(char hostname[], char path[] = "/", int port = 80);
-        bool connected();
-        void disconnect();
-		void monitor();
-		void setDataArrivedDelegate(DataArrivedDelegate dataArrivedDelegate);
-		void send(String data);
-	private:
-        String getStringTableItem(int index);
-        void sendHandshake(char hostname[], char path[]);
-        EthernetClient _client;
-        DataArrivedDelegate _dataArrivedDelegate;
-        bool readHandshake();
-        String readLine();
+public:
+  typedef void (*OnMessage)(WebSocketClient client, char* message);
+  typedef void (*OnOpen)(WebSocketClient client);
+  typedef void (*OnClose)(WebSocketClient client, int code, char* message);
+  typedef void (*OnError)(WebSocketClient client, char* message);
+  void setDebug(SoftwareSerial *debug);
+  void connect(char hostname[], int port = 80, char protocol[] = NULL, char path[] = "/");
+  bool connected();
+  void disconnect();
+  void monitor();
+  void onOpen(OnOpen function);
+  void onClose(OnClose function);
+  void onMessage(OnMessage function);
+  void onError(OnError function); 
+  void send(char* message);
+private:
+  char* _hostname;
+  int _port;
+  char* _path;
+  char* _protocol;
+  bool _connect;
+  unsigned long _retryTimeout;
+  void getStringTableItem(char* buffer, int index);
+  void reconnect();
+  void sendHandshake(char* hostname, char* path, char* protocol);
+  EthernetClient _client;
+  OnOpen _onOpen;
+  OnClose _onClose;
+  OnMessage _onMessage;
+  OnError _onError;  
+  char* _packet;
+  unsigned int _packetLength;
+  byte _opCode;
+  bool readHandshake();
+  void readLine(char* buffer);
+  void generateHash(char* buffer);
+  inline void base64Chop(byte in[], byte out[]);
+  void base64Encode(char output[], byte input[], int inputLen);
+  byte nextByte();
+  
+#ifdef DEBUG
+  SoftwareSerial * _debug;
+  void debug(const __FlashStringHelper *fmt, ...);
+#endif
+  
 };
 
+const char b64Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
 
 #endif

@@ -1,7 +1,9 @@
 /*
  WebsocketClient, a websocket client for Arduino
  Copyright 2011 Kevin Rohling
+ Copyright 2012 Ian Moore
  http://kevinrohling.com
+ http://www.incamoon.com
  
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -23,142 +25,450 @@
  */
 
 #include <WebSocketClient.h>
-#include <WString.h>
-#include <string.h>
+#include <stdlib.h>
+#include <SoftwareSerial.h>
+#include <stdarg.h>
 #include <stdlib.h>
 
-prog_char stringVar[] PROGMEM = "{0}";
-prog_char clientHandshakeLine1[] PROGMEM = "GET {0} HTTP/1.1";
+prog_char clientHandshakeLine1a[] PROGMEM = "GET ";
+prog_char clientHandshakeLine1b[] PROGMEM = " HTTP/1.1";
 prog_char clientHandshakeLine2[] PROGMEM = "Upgrade: WebSocket";
 prog_char clientHandshakeLine3[] PROGMEM = "Connection: Upgrade";
-prog_char clientHandshakeLine4[] PROGMEM = "Host: {0}";
-prog_char clientHandshakeLine5[] PROGMEM = "Origin: ArduinoWebSocketClient";
+prog_char clientHandshakeLine4[] PROGMEM = "Host: ";
+prog_char clientHandshakeLine5[] PROGMEM = "Sec-WebSocket-Origin: ArduinoWebSocketClient";
+prog_char clientHandshakeLine6[] PROGMEM = "Sec-WebSocket-Version: 13";
+prog_char clientHandshakeLine7[] PROGMEM = "Sec-WebSocket-Key: ";
 prog_char serverHandshake[] PROGMEM = "HTTP/1.1 101";
 
 PROGMEM const char *WebSocketClientStringTable[] =
 {   
-    stringVar,
-    clientHandshakeLine1,
-    clientHandshakeLine2,
-    clientHandshakeLine3,
-    clientHandshakeLine4,
-    clientHandshakeLine5,
-    serverHandshake
+  clientHandshakeLine1a,
+  clientHandshakeLine1b,
+  clientHandshakeLine2,
+  clientHandshakeLine3,
+  clientHandshakeLine4,
+  clientHandshakeLine5,
+  clientHandshakeLine6,
+  clientHandshakeLine7,  
+  serverHandshake
 };
 
-String WebSocketClient::getStringTableItem(int index) {
-    char buffer[35];
-    strcpy_P(buffer, (char*)pgm_read_word(&(WebSocketClientStringTable[index])));
-    return String(buffer);
+void WebSocketClient::getStringTableItem(char* buffer, int index) {
+  strcpy_P(buffer, (char*)pgm_read_word(&(WebSocketClientStringTable[index])));
 }
 
-bool WebSocketClient::connect(char hostname[], char path[], int port) {
-    bool result = false;
+void WebSocketClient::connect(char hostname[], int port, char protocol[], char path[]) {
+  _hostname = hostname;
+  _port = port;
+  _protocol = protocol;
+  _path = path;
+  _retryTimeout = millis();
+  _connect = true;
+}
 
-    if (_client.connect(hostname, port)) {
-        sendHandshake(hostname, path);
-        result = readHandshake();
+void WebSocketClient::reconnect() {
+  bool result = false;
+  if (_client.connect(_hostname, _port)) {
+    sendHandshake(_hostname, _path, _protocol);
+    result = readHandshake();
+  }
+  if(!result) {
+    debug(F("Connection Failed!"));
+    if(_onError != NULL) {
+      _onError(*this, "Connection Failed!");
     }
-    
-	return result;
+  }
 }
-
 
 bool WebSocketClient::connected() {
-    return _client.connected();
+  return _client.connected();
 }
 
 void WebSocketClient::disconnect() {
-    _client.stop();
+  _client.stop();
+}
+
+byte WebSocketClient::nextByte() {
+  while(_client.available() == 0);
+  byte b = _client.read();
+  
+#ifdef DEBUG
+  if(b < 0) {
+    debug(F("Internal Error in Ethernet Client Library (-1 returned where >= 0 expected)"));
+  }
+#endif
+  
+  return b;
 }
 
 void WebSocketClient::monitor () {
-    char character;
+  
+  if(!_connect) {
+    return;
+  }
+  
+  if(!connected() && millis() > _retryTimeout) {
+    _retryTimeout = millis() + RETRY_TIMEOUT;
+    reconnect();
+  }
     
-	if (_client.available() > 0 && (character = _client.read()) == 0) {
-        String data = "";
-        bool endReached = false;
-        while (!endReached) {
-            character = _client.read();
-            endReached = character == -1;
-
-            if (!endReached) {
-                data += character;
-            }
-        }
-        
-        if (_dataArrivedDelegate != NULL) {
-            _dataArrivedDelegate(*this, data);
-        }
+	if (_client.available() > 2) {
+    byte hdr = nextByte();
+    bool fin = hdr & 0x80;
+    
+#ifdef TRACE
+    debug(F("fin = %x"), fin);
+#endif
+    
+    int opCode = hdr & 0x0F;
+    
+#ifdef TRACE
+    debug(F("op = %x"), opCode);    
+#endif
+    
+    hdr = nextByte();
+    bool mask = hdr & 0x80;
+    int len = hdr & 0x7F;
+    if(len == 126) {
+      len = nextByte();
+      len <<= 8;
+      len += nextByte();  
+    } else if (len == 127) {
+      len = nextByte();
+      for(int i = 0; i < 7; i++) { // NOTE: This may not be correct.  RFC 6455 defines network byte order. (section 5.2)
+        len <<= 8;
+        len += nextByte();
+      }
     }
+    
+#ifdef TRACE
+    debug(F("len = %d"), len);    
+#endif
+    
+    if(mask) { // skipping 4 bytes for now.
+      for(int i = 0; i < 4; i++) {
+        nextByte();
+      }
+    }
+    
+    if(mask) {
+      
+#ifdef DEBUG
+      debug(F("Masking not yet supported (RFC 6455 section 5.3)"));
+#endif
+      
+      if(_onError != NULL) {
+        _onError(*this, "Masking not supported");
+      }
+      free(_packet);
+      return;
+    }
+    
+    if(!fin) {
+      if(_packet == NULL) {
+        _packet = (char*) malloc(len);
+        for(int i = 0; i < len; i++) {
+          _packet[i] = nextByte();
+        }
+        _packetLength = len;
+        _opCode = opCode;
+      } else {
+        int copyLen = _packetLength;
+        _packetLength += len;
+        char *temp = _packet;
+        _packet = (char*)malloc(_packetLength);
+        for(int i = 0; i < _packetLength; i++) {
+          if(i < copyLen) {
+            _packet[i] = temp[i];
+          } else {
+            _packet[i] = nextByte();
+          }
+        }
+        free(temp);
+      }
+      return;
+    }
+        
+    if(_packet == NULL) {
+      _packet = (char*) malloc(len + 1);
+      for(int i = 0; i < len; i++) {
+        _packet[i] = nextByte();
+      }
+      _packet[len] = 0x0;
+    } else {
+      int copyLen = _packetLength;
+      _packetLength += len;
+      char *temp = _packet;
+      _packet = (char*) malloc(_packetLength + 1);
+      for(int i = 0; i < _packetLength; i++) {
+        if(i < copyLen) {
+          _packet[i] = temp[i];
+        } else {
+          _packet[i] = nextByte();
+        }
+      }
+      _packet[_packetLength] = 0x0;
+      free(temp);
+    }
+    
+    if(opCode == 0 && _opCode > 0) {
+      opCode = _opCode;
+      _opCode = 0;
+    }
+    
+    switch(opCode) {
+      case 0x00:
+        
+#ifdef DEBUG
+        debug(F("Unexpected Continuation OpCode"));
+#endif
+        
+        break;
+        
+      case 0x01:
+        
+#ifdef DEBUG
+        debug(F("onMessage: data = %s"), _packet);
+#endif
+        
+        if (_onMessage != NULL) {
+          _onMessage(*this, _packet);
+        }
+        break;
+        
+      case 0x02:
+        
+#ifdef DEBUG
+        debug(F("Binary messages not yet supported (RFC 6455 section 5.6)"));
+#endif
+        
+        if(_onError != NULL) {
+          _onError(*this, "Binary Messages not supported");
+        }
+        break;
+        
+      case 0x09:
+        
+#ifdef DEBUG        
+        debug(F("onPing"));
+#endif 
+        
+        _client.write(0x8A);
+        _client.write(byte(0x00));
+        break;
+        
+      case 0x0A:
+        
+#ifdef DEBUG        
+        debug(F("onPong"));
+#endif
+        
+        break;    
+        
+      case 0x08:
+        
+        unsigned int code = ((byte)_packet[0] << 8) + (byte)_packet[1];
+        
+#ifdef DEBUG
+        debug(F("onClose: code = %d; message = %s"), code, (_packet + 2));
+#endif
+        
+        if(_onClose != NULL) {
+          _onClose(*this, code, (_packet + 2));
+        }
+        _client.stop();
+        break;          
+    }
+    
+    free(_packet);
+    _packet = NULL;
+  }
 }
 
-void WebSocketClient::setDataArrivedDelegate(DataArrivedDelegate dataArrivedDelegate) {
-	  _dataArrivedDelegate = dataArrivedDelegate;
+void WebSocketClient::onMessage(OnMessage fn) {
+  _onMessage = fn;
+}
+
+void WebSocketClient::onOpen(OnOpen fn) {
+  _onOpen = fn;
+}
+
+void WebSocketClient::onClose(OnClose fn) {
+  _onClose = fn;
+}
+
+void WebSocketClient::onError(OnError fn) {
+  _onError = fn;
 }
 
 
-void WebSocketClient::sendHandshake(char hostname[], char path[]) {
-    String stringVar = getStringTableItem(0);
-    String line1 = getStringTableItem(1);
-    String line2 = getStringTableItem(2);
-    String line3 = getStringTableItem(3);
-    String line4 = getStringTableItem(4);
-    String line5 = getStringTableItem(5);
-    
-    line1.replace(stringVar, path);
-    line4.replace(stringVar, hostname);
-    
-    _client.println(line1);
-    _client.println(line2);
-    _client.println(line3);
-    _client.println(line4);
-    _client.println(line5);
-    _client.println();
+void WebSocketClient::sendHandshake(char* hostname, char* path, char* protocol) {
+
+  char buffer[45];
+
+  getStringTableItem(buffer, 0);
+  _client.print(buffer);  
+  _client.print(path);
+
+  getStringTableItem(buffer, 1);
+  _client.println(buffer);
+  
+  getStringTableItem(buffer, 2);
+  _client.println(buffer);
+  
+  getStringTableItem(buffer, 3);
+  _client.println(buffer);
+  
+  getStringTableItem(buffer, 4);
+  _client.print(buffer);
+  _client.println(hostname);
+  
+  getStringTableItem(buffer, 5);
+  _client.println(buffer);
+  
+  getStringTableItem(buffer, 6);
+  _client.println(buffer);
+  
+  getStringTableItem(buffer, 7);
+  _client.print(buffer);
+  
+  generateHash(buffer);
+  _client.println(buffer);
+  
+  _client.println();
 }
 
 bool WebSocketClient::readHandshake() {
-    bool result = false;
-    char character;
-    String handshake = "", line;
-    int maxAttempts = 300, attempts = 0;
-    
-    while(_client.available() == 0 && attempts < maxAttempts) 
-    { 
-        delay(100); 
-        attempts++;
+  bool result = false;
+  char line[128];
+  int maxAttempts = 300, attempts = 0;
+  char response[12];
+  getStringTableItem(response, 8);
+  
+  while(_client.available() == 0 && attempts < maxAttempts) 
+  { 
+    delay(100); 
+    attempts++;
+  }
+  
+  while(true) {
+    readLine(line);
+    if(strcmp(line, "") == 0) {
+      break;
     }
-    
-    while((line = readLine()) != "") {
-        handshake += line + '\n';
+    if(strncmp(line, response, 12) == 0) {
+      result = true;
     }
+  }
     
-    String response = getStringTableItem(6);
-    result = handshake.indexOf(response) != -1;
-    
-    if(!result) {
-        _client.stop();
-    }
-    
-    return result;
+  if(!result) {
+#ifdef DEBUG
+    debug(F("Handshake Failed! Terminating"));
+#endif    
+    _client.stop();
+  }
+  
+  return result;
 }
 
-String WebSocketClient::readLine() {
-    String line = "";
-    char character;
-    
-    while(_client.available() > 0 && (character = _client.read()) != '\n') {
-        if (character != '\r' && character != -1) {
-            line += character;
-        }
+void WebSocketClient::readLine(char* buffer) {
+  char character;
+  
+  int i = 0;
+  while(_client.available() > 0 && (character = _client.read()) != '\n') {
+    if (character != '\r' && character != -1) {
+      buffer[i++] = character;
     }
-    
-    return line;
+  }
+  buffer[i] = 0x0;
 }
 
-void WebSocketClient::send (String data) {
-    _client.print((char)0);
-	_client.print(data);
-    _client.print((char)255);
+void WebSocketClient::send (char* message) {
+  int len = strlen(message);
+  _client.write(0x81);
+  if(len > 125) {
+    _client.write(0xFE);
+    _client.write(byte(len >> 8));
+    _client.write(byte(len & 0xFF));              
+  } else {
+    _client.write(0x80 | byte(len));
+  }
+  for(int i = 0; i < 4; i++) {
+    _client.write((byte)0x00); // use 0x00 for mask bytes which is effectively a NOOP
+  }
+	_client.print(message);
 }
+
+void WebSocketClient::generateHash(char buffer[]) {
+  byte bytes[16];
+  for(int i = 0; i < 16; i++) {
+    bytes[i] = random(255);
+  }
+  base64Encode(buffer, bytes, 16);
+}
+
+void WebSocketClient::base64Encode(char output[], byte input[], int inputLen) {
+
+  int pos = 0;
+  byte out[4];
+  
+  for(int i = 0; i < inputLen; i += 3) {
+    byte in[3];
+    if(i + 2 >= inputLen) {
+      in[0] = input[i];
+      in[1] = input[i+1];
+      in[2] = 0;
+      base64Chop(in, out);
+      out[3] = 64;
+    } else if (i + 1 >= inputLen) {
+      in[0] = input[i];
+      in[1] = 0;
+      in[2] = 0;
+      base64Chop(in, out);
+      out[2] = 64;
+      out[3] = 64;
+    } else {
+      in[0] = input[i];
+      in[1] = input[i+1];
+      in[2] = input[i+2];
+      base64Chop(in, out);
+    }
+    for(int j = 0; j < 4; j++) {
+      output[pos++] = b64Alphabet[out[j]];
+    }
+  }
+  
+  output[pos] = 0x0;
+}
+
+inline void WebSocketClient::base64Chop(byte in[], byte out[]) {
+	out[0] = (in[0] & 0xfc) >> 2;
+	out[1] = ((in[0] & 0x03) << 4) + ((in[1] & 0xf0) >> 4);
+	out[2] = ((in[1] & 0x0f) << 2) + ((in[2] & 0xc0) >> 6);
+	out[3] = (in[2] & 0x3f);
+}
+
+#ifdef DEBUG
+void WebSocketClient::setDebug(SoftwareSerial *serial) {
+  _debug = serial;
+  debug(F("Websockets Debugging On!"));
+}
+
+void WebSocketClient::debug(const __FlashStringHelper *fmt, ... ){
+  if(_debug == NULL) {
+    return;
+  }
+  char tmp[128]; // resulting string limited to 128 chars
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf_P(tmp, 128, (const char*)fmt, args);
+  va_end(args);
+  _debug->println(tmp);
+}
+
+#else
+void WebSocketClient::setDebug(SoftwareSerial *serial) {
+  serial->println(F("uncomment #define DEBUG to enable debugging"));
+}
+#endif
 
