@@ -27,8 +27,8 @@
 #ifndef WEBSOCKETCLIENT_H
 #define WEBSOCKETCLIENT_H_
 
-#define TRACE // uncomment to support TRACE level debugging of wire protocol
-#define DEBUG // turn on debugging
+//#define TRACE // uncomment to support TRACE level debugging of wire protocol
+//#define DEBUG // turn on debugging
 
 #define RETRY_TIMEOUT 3000
 

@@ -38,6 +38,7 @@ prog_char clientHandshakeLine4[] PROGMEM = "Host: ";
 prog_char clientHandshakeLine5[] PROGMEM = "Sec-WebSocket-Origin: ArduinoWebSocketClient";
 prog_char clientHandshakeLine6[] PROGMEM = "Sec-WebSocket-Version: 13";
 prog_char clientHandshakeLine7[] PROGMEM = "Sec-WebSocket-Key: ";
+prog_char clientHandshakeLine8[] PROGMEM = "Sec-WebSocket-Protocol: ";
 prog_char serverHandshake[] PROGMEM = "HTTP/1.1 101";
 
 PROGMEM const char *WebSocketClientStringTable[] =
@@ -50,6 +51,7 @@ PROGMEM const char *WebSocketClientStringTable[] =
   clientHandshakeLine5,
   clientHandshakeLine6,
   clientHandshakeLine7,  
+  clientHandshakeLine8,  
   serverHandshake
 };
 
@@ -73,10 +75,15 @@ void WebSocketClient::reconnect() {
     result = readHandshake();
   }
   if(!result) {
+    
+#ifdef DEBUG    
     debug(F("Connection Failed!"));
+#endif
+    
     if(_onError != NULL) {
       _onError(*this, "Connection Failed!");
     }
+    _client.stop();
   }
 }
 
@@ -135,7 +142,7 @@ void WebSocketClient::monitor () {
       len += nextByte();  
     } else if (len == 127) {
       len = nextByte();
-      for(int i = 0; i < 7; i++) { // NOTE: This may not be correct.  RFC 6455 defines network byte order. (section 5.2)
+      for(int i = 0; i < 7; i++) { // NOTE: This may not be correct.  RFC 6455 defines network byte order(??). (section 5.2)
         len <<= 8;
         len += nextByte();
       }
@@ -334,7 +341,11 @@ void WebSocketClient::sendHandshake(char* hostname, char* path, char* protocol) 
   
   generateHash(buffer);
   _client.println(buffer);
-  
+
+  getStringTableItem(buffer, 8);
+  _client.print(buffer);
+  _client.println(protocol);
+
   _client.println();
 }
 
@@ -343,7 +354,7 @@ bool WebSocketClient::readHandshake() {
   char line[128];
   int maxAttempts = 300, attempts = 0;
   char response[12];
-  getStringTableItem(response, 8);
+  getStringTableItem(response, 9);
   
   while(_client.available() == 0 && attempts < maxAttempts) 
   { 
