@@ -41,7 +41,7 @@ prog_char clientHandshakeLine8[] PROGMEM = "Sec-WebSocket-Protocol: ";
 prog_char serverHandshake[] PROGMEM = "HTTP/1.1 101";
 
 PROGMEM const char *WebSocketClientStringTable[] =
-{   
+{
   clientHandshakeLine1a,
   clientHandshakeLine1b,
   clientHandshakeLine2,
@@ -49,8 +49,8 @@ PROGMEM const char *WebSocketClientStringTable[] =
   clientHandshakeLine4,
   clientHandshakeLine5,
   clientHandshakeLine6,
-  clientHandshakeLine7,  
-  clientHandshakeLine8,  
+  clientHandshakeLine7,
+  clientHandshakeLine8,
   serverHandshake
 };
 
@@ -64,7 +64,7 @@ void WebSocketClient::connect(char hostname[], int port, char protocol[], char p
   _protocol = protocol;
   _path = path;
   _retryTimeout = millis();
-  _connect = true;
+  _canConnect = true;
 }
 
 void WebSocketClient::reconnect() {
@@ -75,10 +75,9 @@ void WebSocketClient::reconnect() {
   }
   if(!result) {
     
-#ifdef DEBUG    
+#ifdef DEBUG
     debug(F("Connection Failed!"));
 #endif
-    
     if(_onError != NULL) {
       _onError(*this, "Connection Failed!");
     }
@@ -113,15 +112,22 @@ byte WebSocketClient::nextByte() {
 
 void WebSocketClient::monitor () {
   
-  if(!_connect) {
+  if(!_canConnect) {
+    return;
+  }
+  
+  if(_reconnecting) {
     return;
   }
   
   if(!connected() && millis() > _retryTimeout) {
     _retryTimeout = millis() + RETRY_TIMEOUT;
+    _reconnecting = true;
     reconnect();
+    _reconnecting = false;
+    return;
   }
-    
+  
 	if (_client.available() > 2) {
     byte hdr = nextByte();
     bool fin = hdr & 0x80;
@@ -133,7 +139,7 @@ void WebSocketClient::monitor () {
     int opCode = hdr & 0x0F;
     
 #ifdef TRACE
-    debug(F("op = %x"), opCode);    
+    debug(F("op = %x"), opCode);
 #endif
     
     hdr = nextByte();
@@ -142,7 +148,7 @@ void WebSocketClient::monitor () {
     if(len == 126) {
       len = nextByte();
       len <<= 8;
-      len += nextByte();  
+      len += nextByte();
     } else if (len == 127) {
       len = nextByte();
       for(int i = 0; i < 7; i++) { // NOTE: This may not be correct.  RFC 6455 defines network byte order(??). (section 5.2)
@@ -152,7 +158,7 @@ void WebSocketClient::monitor () {
     }
     
 #ifdef TRACE
-    debug(F("len = %d"), len);    
+    debug(F("len = %d"), len);
 #endif
     
     if(mask) { // skipping 4 bytes for now.
@@ -198,7 +204,7 @@ void WebSocketClient::monitor () {
       }
       return;
     }
-        
+    
     if(_packet == NULL) {
       _packet = (char*) malloc(len + 1);
       for(int i = 0; i < len; i++) {
@@ -259,9 +265,9 @@ void WebSocketClient::monitor () {
         
       case 0x09:
         
-#ifdef DEBUG        
+#ifdef DEBUG
         debug(F("onPing"));
-#endif 
+#endif
         
         _client.write(0x8A);
         _client.write(byte(0x00));
@@ -269,11 +275,11 @@ void WebSocketClient::monitor () {
         
       case 0x0A:
         
-#ifdef DEBUG        
+#ifdef DEBUG
         debug(F("onPong"));
 #endif
         
-        break;    
+        break;
         
       case 0x08:
         
@@ -287,7 +293,7 @@ void WebSocketClient::monitor () {
           _onClose(*this, code, (_packet + 2));
         }
         _client.stop();
-        break;          
+        break;
     }
     
     free(_packet);
@@ -313,18 +319,13 @@ void WebSocketClient::onError(OnError fn) {
 
 
 void WebSocketClient::sendHandshake(char* hostname, char* path, char* protocol) {
-
+  
   char buffer[45];
-
+  
   getStringTableItem(buffer, 0);
-  _client.print(buffer);  
+  _client.print(buffer);
   _client.print(path);
-    
-#ifdef HANDSHAKE
-    _debug->print(buffer);
-    _debug->print(path);
-#endif
-
+  
   getStringTableItem(buffer, 1);
   _client.println(buffer);
     
@@ -407,9 +408,9 @@ bool WebSocketClient::readHandshake() {
   char response[12];
   getStringTableItem(response, 9);
   
-  while(_client.available() == 0 && attempts < maxAttempts) 
-  { 
-    delay(100); 
+  while(_client.available() == 0 && attempts < maxAttempts)
+  {
+    delay(100);
     attempts++;
   }
   
@@ -426,11 +427,11 @@ bool WebSocketClient::readHandshake() {
       result = true;
     }
   }
-    
+  
   if(!result) {
 #ifdef DEBUG
     debug(F("Handshake Failed! Terminating"));
-#endif    
+#endif
     _client.stop();
   }
   
@@ -449,69 +450,92 @@ void WebSocketClient::readLine(char* buffer) {
   buffer[i] = 0x0;
 }
 
-void WebSocketClient::send (char* message) {
+bool WebSocketClient::send (char* message) {
+  if(!_canConnect || _reconnecting) {
+    return false;
+  }
   int len = strlen(message);
   _client.write(0x81);
   if(len > 125) {
     _client.write(0xFE);
     _client.write(byte(len >> 8));
-    _client.write(byte(len & 0xFF));              
+    _client.write(byte(len & 0xFF));
   } else {
     _client.write(0x80 | byte(len));
   }
   for(int i = 0; i < 4; i++) {
     _client.write((byte)0x00); // use 0x00 for mask bytes which is effectively a NOOP
   }
-	_client.print(message);
+  _client.print(message);
+  return true;
 }
 
-void WebSocketClient::generateHash(char buffer[]) {
+void WebSocketClient::generateHash(char buffer[], size_t bufferlen) {
   byte bytes[16];
   for(int i = 0; i < 16; i++) {
     bytes[i] = random(255);
   }
-  base64Encode(buffer, bytes, 16);
+  base64Encode(bytes, 16, buffer, bufferlen);
 }
 
-void WebSocketClient::base64Encode(char output[], byte input[], int inputLen) {
-
-  int pos = 0;
-  byte out[4];
+size_t WebSocketClient::base64Encode(byte* src, size_t srclength, char* target, size_t targetsize) {
   
-  for(int i = 0; i < inputLen; i += 3) {
-    byte in[3];
-    if(i + 2 >= inputLen) {
-      in[0] = input[i];
-      in[1] = input[i+1];
-      in[2] = 0;
-      base64Chop(in, out);
-      out[3] = 64;
-    } else if (i + 1 >= inputLen) {
-      in[0] = input[i];
-      in[1] = 0;
-      in[2] = 0;
-      base64Chop(in, out);
-      out[2] = 64;
-      out[3] = 64;
+  size_t datalength = 0;
+	char input[3];
+	char output[4];
+	size_t i;
+  
+	while (2 < srclength) {
+		input[0] = *src++;
+		input[1] = *src++;
+		input[2] = *src++;
+		srclength -= 3;
+    
+		output[0] = input[0] >> 2;
+		output[1] = ((input[0] & 0x03) << 4) + (input[1] >> 4);
+		output[2] = ((input[1] & 0x0f) << 2) + (input[2] >> 6);
+		output[3] = input[2] & 0x3f;
+    
+		if (datalength + 4 > targsize) {
+			return (-1);
+    }
+    
+		target[datalength++] = b64Alphabet[output[0]];
+		target[datalength++] = b64Alphabet[output[1]];
+		target[datalength++] = b64Alphabet[output[2]];
+		target[datalength++] = b64Alphabet[output[3]];
+	}
+  
+	/* Now we worry about padding. */
+	if (0 != srclength) {
+		/* Get what's left. */
+		input[0] = input[1] = input[2] = '\0';
+		for (i = 0; i < srclength; i++) {
+			input[i] = *src++;
+    }
+    
+		output[0] = input[0] >> 2;
+		output[1] = ((input[0] & 0x03) << 4) + (input[1] >> 4);
+		output[2] = ((input[1] & 0x0f) << 2) + (input[2] >> 6);
+    
+		if (datalength + 4 > targsize) {
+			return (-1);
+    }
+    
+		target[datalength++] = b64Alphabet[output[0]];
+		target[datalength++] = b64Alphabet[output[1]];
+		if (srclength == 1) {
+			target[datalength++] = '=';
     } else {
-      in[0] = input[i];
-      in[1] = input[i+1];
-      in[2] = input[i+2];
-      base64Chop(in, out);
+			target[datalength++] = b64Alphabet[output[2]];
     }
-    for(int j = 0; j < 4; j++) {
-      output[pos++] = b64Alphabet[out[j]];
-    }
+		target[datalength++] = '=';
+	}
+	if (datalength >= targsize) {
+		return (-1);
   }
-  
-  output[pos] = 0x0;
-}
-
-inline void WebSocketClient::base64Chop(byte in[], byte out[]) {
-	out[0] = (in[0] & 0xfc) >> 2;
-	out[1] = ((in[0] & 0x03) << 4) + ((in[1] & 0xf0) >> 4);
-	out[2] = ((in[1] & 0x0f) << 2) + ((in[2] & 0xc0) >> 6);
-	out[3] = (in[2] & 0x3f);
+	target[datalength] = '\0';
+	return (datalength);
 }
 
 #ifdef DEBUG

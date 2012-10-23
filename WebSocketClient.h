@@ -51,14 +51,15 @@ public:
   void onOpen(OnOpen function);
   void onClose(OnClose function);
   void onMessage(OnMessage function);
-  void onError(OnError function); 
-  void send(char* message);
+  void onError(OnError function);
+  bool send(char* message);
 private:
   char* _hostname;
   int _port;
   char* _path;
   char* _protocol;
-  bool _connect;
+  bool _canConnect;
+  bool _reconnecting;
   unsigned long _retryTimeout;
   void getStringTableItem(char* buffer, int index);
   void reconnect();
@@ -67,15 +68,14 @@ private:
   OnOpen _onOpen;
   OnClose _onClose;
   OnMessage _onMessage;
-  OnError _onError;  
+  OnError _onError;
   char* _packet;
   unsigned int _packetLength;
   byte _opCode;
   bool readHandshake();
   void readLine(char* buffer);
   void generateHash(char* buffer);
-  inline void base64Chop(byte in[], byte out[]);
-  void base64Encode(char output[], byte input[], int inputLen);
+  size_t base64Encode(char* src, size_t srclength, char* target, size_t targetsize);
   byte nextByte();
   
 #ifdef DEBUG
@@ -85,6 +85,6 @@ private:
   
 };
 
-const char b64Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+const char b64Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 #endif
