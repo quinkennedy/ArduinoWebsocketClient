@@ -26,7 +26,6 @@
 
 #include <WebSocketClient.h>
 #include <stdlib.h>
-#include <SoftwareSerial.h>
 #include <stdarg.h>
 #include <stdlib.h>
 
@@ -84,6 +83,10 @@ void WebSocketClient::reconnect() {
       _onError(*this, "Connection Failed!");
     }
     _client.stop();
+  } else {
+      if(_onOpen != NULL) {
+          _onOpen(*this);
+      }
   }
 }
 
@@ -316,37 +319,85 @@ void WebSocketClient::sendHandshake(char* hostname, char* path, char* protocol) 
   getStringTableItem(buffer, 0);
   _client.print(buffer);  
   _client.print(path);
+    
+#ifdef HANDSHAKE
+    _debug->print(buffer);
+    _debug->print(path);
+#endif
 
   getStringTableItem(buffer, 1);
   _client.println(buffer);
-  
+    
+#ifdef HANDSHAKE
+    _debug->println(buffer);
+#endif
+    
   getStringTableItem(buffer, 2);
   _client.println(buffer);
-  
+    
+#ifdef HANDSHAKE
+    _debug->println(buffer);
+#endif
+    
   getStringTableItem(buffer, 3);
   _client.println(buffer);
-  
+    
+#ifdef HANDSHAKE
+    _debug->println(buffer);
+#endif
+    
   getStringTableItem(buffer, 4);
   _client.print(buffer);
   _client.println(hostname);
-  
+    
+#ifdef HANDSHAKE
+    _debug->print(buffer);
+    _debug->println(hostname);
+#endif
+    
   getStringTableItem(buffer, 5);
   _client.println(buffer);
-  
+    
+#ifdef HANDSHAKE
+    _debug->println(buffer);
+#endif
+    
   getStringTableItem(buffer, 6);
   _client.println(buffer);
-  
+    
+#ifdef HANDSHAKE
+    _debug->println(buffer);
+#endif
+    
   getStringTableItem(buffer, 7);
   _client.print(buffer);
-  
+    
+#ifdef HANDSHAKE
+    _debug->print(buffer);
+#endif
+    
   generateHash(buffer);
   _client.println(buffer);
-
+    
+#ifdef HANDSHAKE
+    _debug->println(buffer);
+#endif
+    
   getStringTableItem(buffer, 8);
   _client.print(buffer);
   _client.println(protocol);
-
-  _client.println();
+    
+#ifdef HANDSHAKE
+    _debug->print(buffer);
+    _debug->println(protocol);
+#endif
+    
+    _client.println(); 
+    
+#ifdef HANDSHAKE
+    _debug->println();
+#endif
+    
 }
 
 bool WebSocketClient::readHandshake() {
@@ -363,7 +414,11 @@ bool WebSocketClient::readHandshake() {
   }
   
   while(true) {
-    readLine(line);
+      readLine(line); 
+#ifdef HANDSHAKE
+      _debug->println(line);
+#endif
+      
     if(strcmp(line, "") == 0) {
       break;
     }
@@ -460,7 +515,7 @@ inline void WebSocketClient::base64Chop(byte in[], byte out[]) {
 }
 
 #ifdef DEBUG
-void WebSocketClient::setDebug(SoftwareSerial *serial) {
+void WebSocketClient::setDebug(Stream *serial) {
   _debug = serial;
   debug(F("Websockets Debugging On!"));
 }
@@ -478,7 +533,7 @@ void WebSocketClient::debug(const __FlashStringHelper *fmt, ... ){
 }
 
 #else
-void WebSocketClient::setDebug(SoftwareSerial *serial) {
+void WebSocketClient::setDebug(Stream *serial) {
   serial->println(F("uncomment #define DEBUG to enable debugging"));
 }
 #endif
