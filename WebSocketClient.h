@@ -27,6 +27,7 @@
 #ifndef WEBSOCKETCLIENT_H
 #define WEBSOCKETCLIENT_H_
 
+//#define HANDSHAKE // uncomment to print out the sent and received handshake messages
 //#define TRACE // uncomment to support TRACE level debugging of wire protocol
 //#define DEBUG // turn on debugging
 
@@ -35,7 +36,6 @@
 #include <stdlib.h>
 #include <Ethernet.h>
 #include "Arduino.h"
-#include <SoftwareSerial.h>
 
 class WebSocketClient {
 public:
@@ -43,7 +43,7 @@ public:
   typedef void (*OnOpen)(WebSocketClient client);
   typedef void (*OnClose)(WebSocketClient client, int code, char* message);
   typedef void (*OnError)(WebSocketClient client, char* message);
-  void setDebug(SoftwareSerial *debug);
+  void setDebug(Stream *debug);
   void connect(char hostname[], int port = 80, char protocol[] = NULL, char path[] = "/");
   bool connected();
   void disconnect();
@@ -79,7 +79,7 @@ private:
   byte nextByte();
   
 #ifdef DEBUG
-  SoftwareSerial * _debug;
+  Stream * _debug;
   void debug(const __FlashStringHelper *fmt, ...);
 #endif
   
