@@ -420,7 +420,7 @@ void WebSocketClient::sendHandshake(char* hostname, char* path, char* protocol) 
     _debug->print(buffer);
 #endif
     
-  generateHash(buffer);
+  generateHash(buffer, 45);
   _client.println(buffer);
     
 #ifdef HANDSHAKE
@@ -521,7 +521,7 @@ void WebSocketClient::generateHash(char buffer[], size_t bufferlen) {
   base64Encode(bytes, 16, buffer, bufferlen);
 }
 
-size_t WebSocketClient::base64Encode(byte* src, size_t srclength, char* target, size_t targetsize) {
+size_t WebSocketClient::base64Encode(byte* src, size_t srclength, char* target, size_t targsize) {
   
   size_t datalength = 0;
 	char input[3];

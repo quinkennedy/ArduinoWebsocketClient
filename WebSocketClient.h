@@ -74,8 +74,8 @@ private:
   byte _opCode;
   bool readHandshake();
   void readLine(char* buffer);
-  void generateHash(char* buffer);
-  size_t base64Encode(char* src, size_t srclength, char* target, size_t targetsize);
+  void generateHash(char* buffer, size_t bufferlen);
+  size_t base64Encode(byte* src, size_t srclength, char* target, size_t targetsize);
   byte nextByte();
   
 #ifdef DEBUG
