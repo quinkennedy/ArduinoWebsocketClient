@@ -25,7 +25,7 @@
  */
 
 #ifndef WEBSOCKETCLIENT_H
-#define WEBSOCKETCLIENT_H_
+#define WEBSOCKETCLIENT_H
 
 //#define HANDSHAKE // uncomment to print out the sent and received handshake messages
 //#define TRACE // uncomment to support TRACE level debugging of wire protocol
