@@ -101,13 +101,14 @@ void WebSocketClient::getStringTableItem(char* buffer, int index) {
   strcpy_P(buffer, (char*)pgm_read_word(&(WebSocketClientStringTable[index])));
 }
 
-void WebSocketClient::connect(char hostname[], int port, char protocol[], char path[]) {
+void WebSocketClient::connect(char hostname[], int port, char protocol[], char path[], bool useRandomMask) {
   _hostname = hostname;
   _port = port;
   _protocol = protocol;
   _path = path;
   _retryTimeout = millis();
   _canConnect = true;
+  _useRandomMask = useRandomMask;
 }
 
 void WebSocketClient::reconnect() {
@@ -506,10 +507,30 @@ bool WebSocketClient::send (char* message) {
   } else {
     _client.write(0x80 | byte(len));
   }
-  for(int i = 0; i < 4; i++) {
-    _client.write((byte)0x00); // use 0x00 for mask bytes which is effectively a NOOP
+  if (_useRandomMask){
+    byte mask[4];
+    char iMask = 0;
+    for(; iMask < 4; iMask++) {
+      mask[iMask] = random(0x1FF);//generating random values to support echo.websocket.org
+      //Serial.print(mask[iMask]);
+      //Serial.print(' ');
+      _client.write(mask[iMask]); 
+    }
+    //Serial.println();
+    iMask = 0;
+    while(*message != NULL){
+      _client.write(*message++ ^ mask[iMask++]);
+      if (iMask >= 4){
+        iMask = 0;
+      }
+    }
+    //_client.print("");
+  } else {
+    for(char i = 0; i < 4; i++){
+      _client.write((byte)0x00);// use 0x00 for mask bytes which is effectively a NOOP
+    }
+    _client.print(message);
   }
-  _client.print(message);
   return true;
 }
 

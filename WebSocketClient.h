@@ -44,7 +44,7 @@ public:
   typedef void (*OnClose)(WebSocketClient client, int code, char* message);
   typedef void (*OnError)(WebSocketClient client, char* message);
   void setDebug(Stream *debug);
-  void connect(char hostname[], int port = 80, char protocol[] = NULL, char path[] = "/");
+  void connect(char hostname[], int port = 80, char protocol[] = NULL, char path[] = "/", bool useRandomMask = false);
   bool connected();
   void disconnect();
   void monitor();
@@ -60,6 +60,7 @@ private:
   char* _protocol;
   bool _canConnect;
   bool _reconnecting;
+  bool _useRandomMask;
   unsigned long _retryTimeout;
   void getStringTableItem(char* buffer, int index);
   void reconnect();
