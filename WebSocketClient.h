@@ -77,6 +77,7 @@ private:
   void generateHash(char* buffer, size_t bufferlen);
   size_t base64Encode(byte* src, size_t srclength, char* target, size_t targetsize);
   byte nextByte();
+  bool send(char* message, bool pong);
   
 #ifdef DEBUG
   Stream * _debug;

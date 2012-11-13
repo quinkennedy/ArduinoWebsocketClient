@@ -311,9 +311,7 @@ void WebSocketClient::monitor () {
 #ifdef DEBUG
         debug(F("onPing"));
 #endif
-        
-        _client.write(0x8A);
-        _client.write(byte(0x00));
+        send(_packet, true);
         break;
         
       case 0x0A:
@@ -493,12 +491,16 @@ void WebSocketClient::readLine(char* buffer) {
   buffer[i] = 0x0;
 }
 
-bool WebSocketClient::send (char* message) {
+bool WebSocketClient::send(char* message){
+  return send(message, false);
+}
+
+bool WebSocketClient::send (char* message, bool pong) {
   if(!_canConnect || _reconnecting) {
     return false;
   }
   int len = strlen(message);
-  _client.write(0x81);
+  _client.write(pong ? 0x8A : 0x81);
   if(len > 125) {
     _client.write(0xFE);
     _client.write(byte(len >> 8));
