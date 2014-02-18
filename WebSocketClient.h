@@ -40,6 +40,7 @@
 class WebSocketClient {
 public:
   typedef void (*OnMessage)(WebSocketClient client, char* message);
+  typedef void (*OnBinaryMessage)(WebSocketClient client, byte* message, unsigned int length);
   typedef void (*OnOpen)(WebSocketClient client);
   typedef void (*OnClose)(WebSocketClient client, int code, char* message);
   typedef void (*OnError)(WebSocketClient client, char* message);
@@ -51,8 +52,10 @@ public:
   void onOpen(OnOpen function);
   void onClose(OnClose function);
   void onMessage(OnMessage function);
+  void onBinaryMessage(OnBinaryMessage function);
   void onError(OnError function);
   bool send(char* message);
+  bool sendBinary(byte* message, unsigned int length);
 private:
   char* _hostname;
   int _port;
@@ -68,8 +71,9 @@ private:
   OnOpen _onOpen;
   OnClose _onClose;
   OnMessage _onMessage;
+  OnBinaryMessage _onBinaryMessage;
   OnError _onError;
-  char* _packet;
+  byte* _packet;
   unsigned int _packetLength;
   byte _opCode;
   bool readHandshake();
@@ -77,6 +81,9 @@ private:
   void generateHash(char* buffer, size_t bufferlen);
   size_t base64Encode(byte* src, size_t srclength, char* target, size_t targetsize);
   byte nextByte();
+  bool isBinary(byte opCode){
+    return opCode == 0x02;
+  }
   
 #ifdef DEBUG
   Stream * _debug;

@@ -185,9 +185,14 @@ void WebSocketClient::monitor () {
     debug(F("op = %x"), opCode);
 #endif
     
+    if(opCode == 0 && _opCode > 0) {
+      opCode = _opCode;
+      _opCode = 0;
+    }
+    
     hdr = nextByte();
     bool mask = hdr & 0x80;
-    int len = hdr & 0x7F;
+    unsigned int len = hdr & 0x7F;
     if(len == 126) {
       len = nextByte();
       len <<= 8;
@@ -213,11 +218,11 @@ void WebSocketClient::monitor () {
     if(mask) {
       
 #ifdef DEBUG
-      debug(F("Masking not yet supported (RFC 6455 section 5.3)"));
+      debug(F("'A server MUST NOT mask any frames that it sends to the client.' (RFC 6455 section 5.1)"));
 #endif
       
       if(_onError != NULL) {
-        _onError(*this, "Masking not supported");
+        _onError(*this, "Server MUST NOT mask.");
       }
       free(_packet);
       return;
@@ -225,18 +230,18 @@ void WebSocketClient::monitor () {
     
     if(!fin) {
       if(_packet == NULL) {
-        _packet = (char*) malloc(len);
-        for(int i = 0; i < len; i++) {
+        _packet = (byte*) malloc(len);
+        for(unsigned int i = 0; i < len; i++) {
           _packet[i] = nextByte();
         }
         _packetLength = len;
         _opCode = opCode;
       } else {
-        int copyLen = _packetLength;
+        unsigned int copyLen = _packetLength;
         _packetLength += len;
-        char *temp = _packet;
-        _packet = (char*)malloc(_packetLength);
-        for(int i = 0; i < _packetLength; i++) {
+        byte *temp = _packet;
+        _packet = (byte*)malloc(_packetLength);
+        for(unsigned int i = 0; i < _packetLength; i++) {
           if(i < copyLen) {
             _packet[i] = temp[i];
           } else {
@@ -249,17 +254,17 @@ void WebSocketClient::monitor () {
     }
     
     if(_packet == NULL) {
-      _packet = (char*) malloc(len + 1);
-      for(int i = 0; i < len; i++) {
+      _packet = (byte*) malloc(len + 1);
+      for(unsigned int i = 0; i < len; i++) {
         _packet[i] = nextByte();
       }
       _packet[len] = 0x0;
     } else {
       int copyLen = _packetLength;
       _packetLength += len;
-      char *temp = _packet;
-      _packet = (char*) malloc(_packetLength + 1);
-      for(int i = 0; i < _packetLength; i++) {
+      byte *temp = _packet;
+      _packet = (byte*) malloc(_packetLength + 1);
+      for(unsigned int i = 0; i < _packetLength; i++) {
         if(i < copyLen) {
           _packet[i] = temp[i];
         } else {
@@ -268,11 +273,6 @@ void WebSocketClient::monitor () {
       }
       _packet[_packetLength] = 0x0;
       free(temp);
-    }
-    
-    if(opCode == 0 && _opCode > 0) {
-      opCode = _opCode;
-      _opCode = 0;
     }
     
     switch(opCode) {
@@ -291,18 +291,18 @@ void WebSocketClient::monitor () {
 #endif
         
         if (_onMessage != NULL) {
-          _onMessage(*this, _packet);
+          _onMessage(*this, (char*)_packet);
         }
         break;
         
       case 0x02:
         
 #ifdef DEBUG
-        debug(F("Binary messages not yet supported (RFC 6455 section 5.6)"));
+        debug(F("onBinaryMessage: length = %d"), len);
 #endif
-        
-        if(_onError != NULL) {
-          _onError(*this, "Binary Messages not supported");
+
+        if (_onBinaryMessage != NULL){
+          _onBinaryMessage(*this, _packet);
         }
         break;
         
@@ -346,6 +346,10 @@ void WebSocketClient::monitor () {
 
 void WebSocketClient::onMessage(OnMessage fn) {
   _onMessage = fn;
+}
+
+void WebSocketClient::onBinaryMessage(onBinaryMessage fn){
+  _onBinaryMessage = fn;
 }
 
 void WebSocketClient::onOpen(OnOpen fn) {
@@ -497,14 +501,37 @@ bool WebSocketClient::send (char* message) {
   if(!_canConnect || _reconnecting) {
     return false;
   }
-  int len = strlen(message);
+  unsigned int len = strlen(message);
   _client.write(0x81);
+  //NOTE: this if-statement does not handle messages longer than 65535 bytes
+  //see RFC 6455 Section 5.2
   if(len > 125) {
     _client.write(0xFE);
     _client.write(byte(len >> 8));
     _client.write(byte(len & 0xFF));
   } else {
     _client.write(0x80 | byte(len));
+  }
+  for(int i = 0; i < 4; i++) {
+    _client.write((byte)0x00); // use 0x00 for mask bytes which is effectively a NOOP
+  }
+  _client.print(message);
+  return true;
+}
+
+bool WebSocketClient::sendBinary(byte* message, unsigned int length){
+  if(!_canConnect || _reconnecting) {
+    return false;
+  }
+  _client.write(0x82);
+  //NOTE: this if-statement does not handle messages longer than 65535 bytes
+  //see RFC 6455 Section 5.2
+  if(length > 125) {
+    _client.write(0xFE);
+    _client.write(byte(length >> 8));
+    _client.write(byte(length & 0xFF));
+  } else {
+    _client.write(0x80 | byte(length));
   }
   for(int i = 0; i < 4; i++) {
     _client.write((byte)0x00); // use 0x00 for mask bytes which is effectively a NOOP
